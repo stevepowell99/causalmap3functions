@@ -1,0 +1,474 @@
+---
+title: "Causal Map Functions Vignette"
+author: "Steve Powell"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    toc_depth: 3
+    number_sections: false
+    theme: lumen
+editor_options: 
+  chunk_output_type: console
+---
+
+# Causal Map 3 Functions
+
+This file briefly illustrates the causal mapping functions for Causal Map 3.
+
+The functions are used within Causal Map 3, which provides a web interface for managing causal mapping project and also enables autocoding with AI. The functions can also be used in the R console as illustrated here.  
+
+These functions completely replace the functions in the old R package CausalMapFunctions which is now deprecated. This new set of functions is much simpler. 
+
+#  Setup
+
+```{r setup, cache=F,include=F}
+# library(DBI)
+# library(dbplyr)
+# library(pool)
+# library(dplyr, warn.conflicts = FALSE)
+# library(httr)
+ library(tidyverse)
+# library(readxl)
+# library(stringi)
+# library(jsonlite)
+ library(DiagrammeR)
+# library(openxlsx)
+knitr::opts_chunk$set(echo = T,warning=F,message=F)
+```
+
+# Load the functions and some example data
+
+```{r setup2, cache=F,include=F}
+library(causalmap3functions)
+
+# source the functions and get example data
+# for the convenience of the developer...
+if(Sys.getenv("USERDOMAIN") == "STEVE-P") {
+source("R/cm3functions.R") 
+ex="example-file.xlsx" %>%
+  get_from_excel()
+  
+} else {
+  
+source("https://gist.githubusercontent.com/stevepowell99/ae16b31779d1e462e5a3c7003eef79a1/raw/cm3functions.R")
+url2 <- "https://figshare.com/ndownloader/files/42600379"
+ex <- 
+list(
+  files=read.xlsx(url2,1),
+  links=read.xlsx(url2,2),
+  statements=read.xlsx(url2,3),
+  sources=read.xlsx(url2,4)
+)
+} 
+
+# constants -----------------------------------------------------------------
+
+contrary_color <- "#f2ab73"
+ordinary_color <- "#058488"
+flipchar <- "~"
+
+
+
+```
+
+# Inspecting the example data file
+
+```{r}
+ex$links %>% 
+  arrange(desc(source_count)) %>% 
+  select(from_label,to_label,source_count,source_id,link_id,statement_id) %>% 
+  head
+
+ex$links %>% 
+  arrange(desc(source_count)) %>% 
+  distinct(from_label,to_label,.keep_all = T) %>% 
+  select(from_label,to_label,source_count,source_id,link_id,statement_id) %>% 
+  head
+
+ex$links %>% 
+  make_factors_from_links() %>% 
+  arrange(desc(source_count)) %>% 
+  head
+
+ex$sources %>% 
+  select(1:6) %>% 
+  head
+
+ex$statements %>% 
+  select(1:6) %>% 
+  head
+
+
+
+```
+
+# Filtering the links
+
+These functions use tidyverse conventions and workflows throughout. 
+
+There are no special functions for filtering the links because the tidyverse workflow is so simple:
+
+```{r}
+ex$links %>% 
+  filter(str_detect(source_id,"MNX"))
+ex$links %>% 
+  filter(statement_id=="MNY-1 | 43")
+
+```
+
+However there is a special function for including and excluding factors by label.
+
+
+# All the transforms functions
+
+## Zoooming
+
+```{r}
+ex$links %>% 
+  make_factors_from_links() %>% 
+  arrange(desc(source_count)) %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  make_factors_from_links() %>% 
+  arrange(desc(source_count)) %>% 
+  head
+
+```
+
+
+## Selecting top links and factors
+
+```{r}
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Sources",which="Top",top=3) %>%  
+  make_print_map2(ex$links)
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Sources",which="Top",top=3) %>%  
+  select(from_label,to_label,link_count) %>% 
+  distinct() %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Sources",which="At_least",top=15) %>% 
+  make_factors_from_links() %>% 
+  arrange(desc(source_count)) %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Links",which="Top",top=12) %>%  
+  make_factors_from_links() %>% 
+  arrange(desc(link_count)) %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Links",which="At_least",top=20) %>%  
+  make_factors_from_links() %>% 
+  arrange(desc(link_count)) %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_links(type="Sources",which="Top",top=2) %>%  
+  select(from_label,to_label,link_count) %>% 
+  distinct() %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_links(type="Sources",which="At_least",top=4) %>%  
+  select(from_label,to_label,link_count,source_count) %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_links(type="Links",which="Top",top=20) %>%  
+  select(from_label,to_label,link_count,source_count) %>% 
+  arrange(desc(link_count)) %>% 
+  distinct() %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_links(type="Sources",which="Top",top=20) %>%  
+  select(from_label,to_label,link_count,source_count) %>% 
+  arrange(desc(source_count)) %>% 
+  distinct() %>% 
+  head
+
+```
+
+## Tracing paths
+
+### Tracing paths, showing source IDs
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 2,transforms_tracing_threads = F) %>%  
+  pipe_label("source_id") %>% 
+  make_print_map2(original = ex$links,map_color_factors_column = "outcomeness")
+```
+
+
+
+### Tracing threads, showing source IDs
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 2,transforms_tracing_threads = T) %>%  
+  pipe_label("source_id") %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+```
+
+### Tracing paths, showing source counts
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 2,transforms_tracing_threads = F) %>%  
+  pipe_label("source_count") %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+```
+
+
+
+### Tracing threads, showing source counts
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 2,transforms_tracing_threads = T) %>%  
+  pipe_label("source_count") %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+```
+
+### Tracing just one step
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 1) %>%  
+  make_print_map2(original = ex$links)
+```
+
+### Tracing threads, three steps
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_trace(sess_links = ex$links,from_labels = "Farm production",to_labels="Diet improved",steps = 3,transforms_tracing_threads = T) %>%  
+  pipe_label("link_count") %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+```
+
+
+## Removing brackets
+
+This file doesn't actually have factor names with brackets, but we can create some
+
+```{r}
+tmp <- 
+  ex$links %>% 
+  mutate(from_label=str_replace_all(from_label,"Wellbeing","Wellbeing (outcome)")) %>% 
+  mutate(to_label=str_replace_all(to_label,"Wellbeing","Wellbeing (outcome)"))
+
+tmp %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Wellbeing"),any=T) %>%  
+  pipe_top_factors(5) %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+tmp %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Wellbeing"),any=T) %>%  
+  pipe_top_factors(5) %>% 
+  pipe_remove_brackets(round = T) %>% 
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+
+```
+
+
+## Focus
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Ability to buy food")) %>%  
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+  
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Ability"),any = T) %>%  
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Ability to buy food","Diet improved"),any = T) %>%  
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_focus(c("Ability","Diet improved"),any = T) %>%  
+  make_print_map2(original = ex$links,map_label_factors = "source_count")
+
+```
+
+## Exclude
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Links",which="Top",top=6) %>%
+  select(from_label,to_label,link_count,source_count) %>% 
+  distinct %>% 
+  head
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_top_factors(type="Links",which="Top",top=6) %>%
+  pipe_exclude("Increased knowledge" %>% c("Diet improved")) %>% 
+  select(from_label,to_label,link_count,source_count) %>% 
+  distinct %>% 
+  head
+
+```
+
+
+
+## Hashtags
+
+```{r}
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_retain_hashtags(hashtags = "#hypothetical",keep=T)  %>% 
+  select(from_label,to_label,link_count,source_count,hashtags) 
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_retain_hashtags(hashtags = "#hypothetical",keep=T)  %>% 
+  pipe_label("hashtags") %>% 
+  make_print_map2(ex$links)
+
+ex$links %>% 
+  pipe_zoom() %>%
+  pipe_retain_hashtags(hashtags = "#hypothetical",keep=F)  %>% 
+  filter(hashtags!="") %>% 
+  select(from_label,to_label,link_count,source_count,hashtags) 
+
+
+```
+
+
+## Combining opposites
+
+```{r}
+ex$links %>% 
+  pipe_focus(xc("~"),any = T) %>% 
+  pipe_top_factors(20) %>% 
+  make_print_map2(ex$links)
+
+ex$links %>% 
+  pipe_focus(xc("~"),any = T) %>% 
+  pipe_top_factors(20) %>% 
+  make_print_map2(ex$links,map_colour_opposites_red = T)
+
+ex$links %>% 
+  pipe_focus(xc("~"),any = T) %>% 
+  pipe_combine_opposites() %>% 
+  pipe_top_factors(20) %>% 
+  make_print_map2(ex$links)
+
+
+if(F){
+  ex2 <- get_file("opposites-example",conn=conn)
+  
+ex2$links %>% 
+  pipe_combine_opposites() %>% 
+  make_print_map2(ex$links)
+  
+  
+}
+
+
+```
+
+# Creating additional tables
+
+## Mentions table
+
+```{r}
+ex$links %>% 
+  make_mentions_tabl() %>% 
+  select(label,direction,link_id)
+
+ex$links %>% 
+  make_mentions_tabl() %>% 
+  select(label,direction,link_id) %>% 
+  pivot_wider(names_from=direction,values_from = link_id,values_fn = length)
+
+```
+
+
+# Formatting the map
+
+Note that labelling links is a pipe function, not part of the call to the map
+
+```{r}
+ex$links %>% 
+  pipe_zoom(1) %>% 
+  pipe_top_factors(8) %>% 
+  make_print_map2(ex$links,map_color_factors_column = "outcomeness")
+
+ex$links %>% 
+  pipe_zoom(1) %>% 
+  pipe_top_factors(8) %>% 
+  pipe_label("source_count") %>% 
+  make_print_map2(ex$links,map_color_factors_column = "source_count",map_size_factors = "source_count",map_label_factors = "source_count",map_size_links = "source_count",map_wrap_factor_labels = 9)
+
+```
+
+
+## Surprises
+
+Calculating surprises is technically a formatting function
+
+```{r}
+ex$links %>% 
+  pipe_zoom(1) %>% 
+  pipe_top_links(8) %>% 
+  pipe_label(map_label_links = "#Name of village" ,type="Surprise_links") %>% 
+  make_print_map2(original = ex$links,map_color_factors_column = "link_count",map_size_links ="link_count")
+
+ex$links %>% 
+  pipe_zoom(1) %>% 
+  pipe_top_links(8) %>% 
+  pipe_label(map_label_links = "#Name of village",type="Surprise_sources" ) %>% 
+  make_print_map2(original = ex$links,map_color_factors_column = "link_count",map_size_links ="link_count")
+
+
+
+
+ex$links %>% 
+  pipe_zoom(1) %>% 
+  pipe_top_links(18) %>% 
+  pipe_label(map_label_links = "#Name of village",type = "Surprise_links" ) %>% 
+  make_print_map2(original = ex$links,map_color_factors_column = "link_count",map_size_links ="source_count")
+
+```
+
+
+

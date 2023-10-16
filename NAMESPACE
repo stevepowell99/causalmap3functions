@@ -1,0 +1,6 @@
+exportPattern("^[[:alpha:]]+")
+importFrom("grDevices", "colorRamp", "rgb")
+importFrom("graphics", "text")
+importFrom("methods", "new")
+importFrom("stats", "chisq.test", "filter", "na.omit", "step")
+importFrom("utils", "tail")
